@@ -1,0 +1,12 @@
+[project]
+name = "ebook-summarizer"
+version = "0.1.0"
+description = "A simple tool to summarize EPUB ebooks using a local LLM via LM Studio."
+authors = [{ name = "Anders Henriksen"}]
+requires-python = ">=3.11"
+dependencies = [
+    "lmstudio",
+    "ebooklib",
+    "beautifulsoup4",
+    "tqdm",
+]
