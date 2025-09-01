@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+import json
 import lmstudio as lms
 import ebooklib
 from ebooklib import epub
@@ -16,8 +17,36 @@ def get_text_from_html(html_content):
 
 
 def chunk_text(text, chunk_size):
-    """Splits text into chunks of a specified size."""
-    return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+    """
+    Splits text into chunks of a specified size. If the text is larger than
+    the chunk size, it tries to split at the nearest preceding double newline,
+    then a single newline, to keep paragraphs/sentences intact.
+    """
+    chunks = []
+    remaining_text = text.strip()
+
+    while remaining_text:
+        if len(remaining_text) <= chunk_size:
+            chunks.append(remaining_text)
+            break
+
+        # Prioritize splitting at a double newline (paragraph break)
+        split_pos = remaining_text.rfind('\n\n', 0, chunk_size)
+
+        # If no good paragraph break is found, try a single newline (line break)
+        if split_pos == -1 or split_pos < chunk_size / 2:
+            single_newline_pos = remaining_text.rfind('\n', 0, chunk_size)
+            if single_newline_pos != -1 and single_newline_pos >= chunk_size / 2:
+                split_pos = single_newline_pos
+
+        # If no suitable break of any kind is found, make a hard cut
+        if split_pos == -1 or split_pos < chunk_size / 2:
+            split_pos = chunk_size
+
+        chunks.append(remaining_text[:split_pos])
+        remaining_text = remaining_text[split_pos:].lstrip()
+
+    return chunks
 
 
 def format_summary_as_html(summary_text):
@@ -57,7 +86,7 @@ def condense_recap(recap_text, llm):
     try:
         full_prompt = f"{config.RECAP_SYSTEM_PROMPT}\n\n{config.RECAP_SUMMARY_PROMPT.format(recap=recap_text)}"
         response = llm.respond(full_prompt)
-        condensed_recap = response[0].text
+        condensed_recap = response.content
         print("--- Condensing complete. ---")
         return condensed_recap
     except Exception as e:
@@ -66,19 +95,25 @@ def condense_recap(recap_text, llm):
         return recap_text
 
 
-def summarize_chapter_content(item_content, llm):
+def summarize_chapter_content(item_content, llm, current_recap):
     """Summarizes the text content of a single chapter."""
     original_text = get_text_from_html(item_content)
     text_chunks = chunk_text(original_text, config.CHUNK_SIZE)
 
     summarized_content = ""
-    recap = "This is the beginning of the book."
+    recap = current_recap
 
     for chunk in text_chunks:
         try:
-            full_prompt = f"{config.SYSTEM_PROMPT}\n\n{config.USER_PROMPT_TEMPLATE.format(recap=recap, chunk=chunk)}"
+            continuation_instruction = ""
+            if recap != "This is the beginning of the book.":
+                # Provide the last 150 characters as a snippet for smoother transitions
+                snippet = recap.strip()[-150:]
+                continuation_instruction = f"Your response should seamlessly continue the story from this ending snippet of the previous part: '...{snippet}'"
+
+            full_prompt = f"{config.SYSTEM_PROMPT}\n\n{config.USER_PROMPT_TEMPLATE.format(recap=recap, continuation_instruction=continuation_instruction, chunk=chunk)}"
             response = llm.respond(full_prompt)
-            chunk_summary = response[0].text
+            chunk_summary = response.content
             summarized_content += chunk_summary + "\n\n"
 
             # Update the recap with the latest summary
@@ -95,7 +130,7 @@ def summarize_chapter_content(item_content, llm):
             print(f"\nAn error occurred while communicating with the LLM: {e}")
             print("Skipping this chunk.")
             continue
-    return summarized_content
+    return summarized_content, recap
 
 
 def rebuild_book_structure(original_book, summarized_book, new_items_map):
@@ -124,16 +159,37 @@ def rebuild_book_structure(original_book, summarized_book, new_items_map):
             summarized_book.spine.append(new_items_map[original_item.get_name()])
 
 
+def load_progress(file_path):
+    """Loads summarization progress from a file."""
+    if os.path.exists(file_path):
+        print(f"Resuming from saved progress file: '{file_path}'")
+        with open(file_path, 'r', encoding='utf-8') as f:
+            progress = json.load(f)
+            return progress.get("recap"), progress.get("processed_chapters", {})
+    return "This is the beginning of the book.", {}
+
+
+def save_progress(file_path, recap, processed_chapters):
+    """Saves summarization progress to a file."""
+    progress = {
+        "recap": recap,
+        "processed_chapters": processed_chapters
+    }
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(progress, f, indent=4)
+
+
 def summarize_ebook():
     """Main function to read, summarize, and write an EPUB file."""
     if not os.path.exists(config.INPUT_EPUB_PATH):
         print(f"Error: Input file not found at '{config.INPUT_EPUB_PATH}'")
-        print("Please place your e-book in the same directory and name it 'input.epub' or update config.py.")
         return
 
     llm = initialize_llm()
     if not llm:
         return
+
+    recap, processed_chapters = load_progress(config.PROGRESS_FILE_PATH)
 
     print(f"Reading e-book: '{config.INPUT_EPUB_PATH}'")
     original_book = epub.read_epub(config.INPUT_EPUB_PATH)
@@ -147,19 +203,26 @@ def summarize_ebook():
     with tqdm(total=len(content_items), desc="Summarizing Chapters") as pbar:
         for item in original_book.get_items():
             if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                pbar.set_postfix_str(item.get_name(), refresh=True)
-                summarized_text = summarize_chapter_content(item.get_content(), llm)
+                item_name = item.get_name()
+                pbar.set_postfix_str(item_name, refresh=True)
 
-                new_chapter = epub.EpubHtml(
-                    title=item.get_name(),
-                    file_name=f"summary_{item.get_name()}",
-                    lang='en'
-                )
-                new_chapter.content = format_summary_as_html(summarized_text)
+                if item_name in processed_chapters:
+                    print(f"\nSkipping already processed chapter: {item_name}")
+                    summarized_text_html = processed_chapters[item_name]
+                else:
+                    summarized_text, new_recap = summarize_chapter_content(item.get_content(), llm, recap)
+                    recap = new_recap
+                    summarized_text_html = format_summary_as_html(summarized_text)
+                    processed_chapters[item_name] = summarized_text_html
+                    save_progress(config.PROGRESS_FILE_PATH, recap, processed_chapters)
+
+                new_chapter = epub.EpubHtml(title=item_name, file_name=f"summary_{item_name}", lang='en')
+                new_chapter.content = summarized_text_html
                 summarized_book.add_item(new_chapter)
-                new_items_map[item.get_name()] = new_chapter
+                new_items_map[item_name] = new_chapter
                 pbar.update(1)
             else:
+                # Add non-document items like images, css, etc.
                 summarized_book.add_item(item)
                 new_items_map[item.get_name()] = item
 
