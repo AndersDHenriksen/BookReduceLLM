@@ -40,7 +40,7 @@ ORIGINAL CHUNK TO REWRITE:
 """
 
 # This is the instruction given to the model when the recap becomes too long.
-RECAP_SYSTEM_PROMPT = "You are an expert at condensing summaries. Your task is to take a running summary and make it shorter, keeping only the most critical information needed to understand the next part of a story."
+RECAP_SYSTEM_PROMPT = "You are an expert at condensing summaries. Your task is to take a running summary and make it shorter, keeping only the most critical information needed to understand the next part of a story. The condensed summary must be at least 50% shorter than the original."
 
 # This prompt is used to summarize the summary itself.
 RECAP_SUMMARY_PROMPT = """
