@@ -102,29 +102,50 @@ def summarize_chapter_content(item_content, llm, current_recap):
 
     summarized_content = ""
     recap = current_recap
+    recap_enabled = config.MAX_RECAP_SIZE > 0
+
+    # Use the end of the previous chapter's summary (the recap) for the first chunk.
+    last_summary_snippet = ""
+    if recap != "This is the beginning of the book.":
+        last_summary_snippet = recap.strip()[-150:]
 
     for chunk in text_chunks:
         try:
+            # Build the continuation instruction if there's a snippet from the previous chunk.
             continuation_instruction = ""
-            if recap != "This is the beginning of the book.":
-                # Provide the last 150 characters as a snippet for smoother transitions
-                snippet = recap.strip()[-150:]
-                continuation_instruction = f"Your response should seamlessly continue the story from this ending snippet of the previous part: '...{snippet}'"
+            if last_summary_snippet:
+                continuation_instruction = f"\nYour response should seamlessly continue the story from this ending snippet of the previous part: '...{last_summary_snippet}'\n"
 
-            full_prompt = f"{config.SYSTEM_PROMPT}\n\n{config.USER_PROMPT_TEMPLATE.format(recap=recap, continuation_instruction=continuation_instruction, chunk=chunk)}"
+            # Always start with the main task, which now includes the continuation instruction placeholder.
+            prompt_body = config.TASK_SECTION_TEMPLATE.format(
+                chunk=chunk,
+                continuation_instruction=continuation_instruction
+            )
+
+            # If recap is enabled, prepend the context/recap section
+            if recap_enabled:
+                recap_section = config.RECAP_SECTION_TEMPLATE.format(recap=recap)
+                prompt_body = f"{recap_section}\n\n{prompt_body}"
+
+            # Combine system prompt with the dynamically built body
+            full_prompt = f"{config.SYSTEM_PROMPT}\n\n{prompt_body}"
+
             response = llm.respond(full_prompt)
             chunk_summary = response.content
             summarized_content += chunk_summary + "\n\n"
 
-            # Update the recap with the latest summary
-            if recap == "This is the beginning of the book.":
-                recap = chunk_summary
-            else:
-                recap += "\n\n" + chunk_summary
+            # The end of the current summary becomes the snippet for the next chunk.
+            last_summary_snippet = chunk_summary.strip()[-150:]
 
-            # Condense the recap if it's too long
-            if len(recap) > config.MAX_RECAP_SIZE:
-                recap = condense_recap(recap, llm)
+            # Only update and manage the full recap if it's enabled
+            if recap_enabled:
+                if recap == "This is the beginning of the book.":
+                    recap = chunk_summary
+                else:
+                    recap += "\n\n" + chunk_summary
+
+                if len(recap) > config.MAX_RECAP_SIZE:
+                    recap = condense_recap(recap, llm)
 
         except Exception as e:
             print(f"\nAn error occurred while communicating with the LLM: {e}")
