@@ -133,30 +133,24 @@ def summarize_chapter_content(item_content, llm, current_recap):
     return summarized_content, recap
 
 
-def rebuild_book_structure(original_book, summarized_book, new_items_map):
-    """Rebuilds the TOC and spine for the summarized book."""
+def rebuild_book_structure(summarized_book, new_items_map, content_item_names):
+    """
+    Builds a simple, linear TOC and spine for the summarized book.
+    This is more reliable than trying to replicate the original structure.
+    """
     print("\nRebuilding e-book structure (TOC and Spine)...")
     summarized_book.toc = []
-    for link in original_book.toc:
-        original_item_name = ""
-        if isinstance(link, tuple) and len(link) > 1 and hasattr(link[1], 'href'):
-            original_item_name = os.path.basename(link[1].href.split('#')[0])
-            if original_item_name in new_items_map:
-                summarized_book.toc.append(
-                    epub.Link(new_items_map[original_item_name].file_name, link[1].title, link[1].uid)
-                )
-        elif hasattr(link, 'href'):
-            original_item_name = os.path.basename(link.href.split('#')[0])
-            if original_item_name in new_items_map:
-                summarized_book.toc.append(
-                    epub.Link(new_items_map[original_item_name].file_name, link.title, link.uid)
-                )
-
     summarized_book.spine = ['nav']
-    for item_id in original_book.spine:
-        original_item = original_book.get_item_with_id(item_id)
-        if original_item and original_item.get_name() in new_items_map:
-            summarized_book.spine.append(new_items_map[original_item.get_name()])
+
+    # Create a simple TOC and spine from the summarized content items in order
+    for item_name in content_item_names:
+        if item_name in new_items_map:
+            chapter = new_items_map[item_name]
+            # Ensure the item is a chapter and has an ID to prevent errors
+            if isinstance(chapter, epub.EpubHtml):
+                link = epub.Link(chapter.file_name, chapter.title, uid=str(chapter.id))
+                summarized_book.toc.append(link)
+                summarized_book.spine.append(chapter)
 
 
 def load_progress(file_path):
@@ -198,12 +192,13 @@ def summarize_ebook():
 
     new_items_map = {}
     content_items = [item for item in original_book.get_items() if item.get_type() == ebooklib.ITEM_DOCUMENT]
+    content_item_names = [item.get_name() for item in content_items]
 
     print("\nStarting summarization process...")
     with tqdm(total=len(content_items), desc="Summarizing Chapters") as pbar:
         for item in original_book.get_items():
+            item_name = item.get_name()
             if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                item_name = item.get_name()
                 pbar.set_postfix_str(item_name, refresh=True)
 
                 if item_name in processed_chapters:
@@ -216,7 +211,7 @@ def summarize_ebook():
                     processed_chapters[item_name] = summarized_text_html
                     save_progress(config.PROGRESS_FILE_PATH, recap, processed_chapters)
 
-                new_chapter = epub.EpubHtml(title=item_name, file_name=f"summary_{item_name}", lang='en')
+                new_chapter = epub.EpubHtml(title=item.title or item_name, file_name=f"summary_{item_name}", lang='en')
                 new_chapter.content = summarized_text_html
                 summarized_book.add_item(new_chapter)
                 new_items_map[item_name] = new_chapter
@@ -224,9 +219,9 @@ def summarize_ebook():
             else:
                 # Add non-document items like images, css, etc.
                 summarized_book.add_item(item)
-                new_items_map[item.get_name()] = item
+                new_items_map[item_name] = item
 
-    rebuild_book_structure(original_book, summarized_book, new_items_map)
+    rebuild_book_structure(summarized_book, new_items_map, content_item_names)
 
     summarized_book.add_item(epub.EpubNcx())
     summarized_book.add_item(epub.EpubNav())

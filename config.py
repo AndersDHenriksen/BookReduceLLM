@@ -18,11 +18,11 @@ CHUNK_SIZE = 6000
 
 # The maximum size of the rolling summary (recap) before it gets summarized again.
 # This prevents the context sent to the LLM from growing too large.
-MAX_RECAP_SIZE = 4000
+MAX_RECAP_SIZE = 10000
 
 # --- LLM Prompts ---
 # This is the main instruction given to the model for each chunk.
-SYSTEM_PROMPT = "You are a ruthless editor. Your sole mission is to drastically reduce a book's length to about 25% of its original size. Do not summarize. You must rewrite the story, but aggressively cut descriptive language, redundant dialogue, and non-essential subplots. Retain only the core narrative, character progression, and critical plot points. The final output must be a continuous, flowing story, not a list of events. Be concise and direct."
+SYSTEM_PROMPT = "You are a ruthless editor. Your sole mission is to drastically reduce a book's length to about 25% of its original size. Do not summarize. You must rewrite the story, but aggressively cut redundant language and dialogue, and non-essential subplots. Retain only the core narrative, character progression, and critical plot points. The final output must be a continuous, flowing story, not a list of events and not consisting of short sentences."
 
 # This prompt template is used for summarizing each chunk of the book.
 USER_PROMPT_TEMPLATE = """
@@ -31,7 +31,7 @@ This is the story so far (condensed):
 {recap}
 
 TASK:
-Aggressively rewrite and shorten the following text chunk. Your rewritten version MUST be significantly shorter than the original. {continuation_instruction} Eliminate filler words and descriptions. Focus only on what is essential to move the story forward.
+Aggressively rewrite and shorten the following text chunk. Your rewritten version MUST be significantly shorter than the original. {continuation_instruction} Focus only on what is essential to move the story forward but write in full sentences.
 
 ORIGINAL CHUNK TO REWRITE:
 ---
