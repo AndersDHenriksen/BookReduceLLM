@@ -33,7 +33,7 @@ STORY SO FAR:
 """
 
 # This prompt template is used for summarizing each chunk of the book.
-USER_PROMPT_TEMPLATE = """
+TASK_SECTION_TEMPLATE = """
 TASK:
 Rewrite and shorten the following text chunk. Your rewritten version must be significantly shorter than the original. {continuation_instruction} Focus only on what is essential to move the story forward but write in full sentences.
 
